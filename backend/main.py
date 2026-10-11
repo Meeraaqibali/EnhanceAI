@@ -1,122 +1,131 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
-import io
 import os
-from PIL import Image, ImageEnhance, ImageFilter
-from gradio_client import Client, handle_file
+import io
+import json
+import re
+import requests
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
-app = FastAPI(title="EnhanceAI Backend")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# --- Config ---
-HF_TOKEN = os.getenv("HF_TOKEN", "")  # set this in your env
-FACE_SPACE = "leonelhs/faceshine"     # free GFPGAN + CodeFormer Space
-MAX_DIM = 2000
-
-# --- Cache the client so we don't reconnect every request ---
-_client = None
-
-def get_client():
-    global _client
-    if _client is None:
-        _client = Client(FACE_SPACE, hf_token=HF_TOKEN if HF_TOKEN else None)
-    return _client
+AI_ENGINE_KEY = os.getenv("AI_ENGINE_KEY", "")
+AI_ENGINE_HOST = "ai-powered-photo-restoration.p.rapidapi.com"
+PORT = 8000
 
 
-# ---------- AI face restoration ----------
-def ai_face_restore(img: Image.Image) -> Image.Image:
-    """Send image to HF Space for GFPGAN/CodeFormer face restoration."""
-    try:
-        client = get_client()
-        # Save input to a temp file because gradio_client needs a path
-        tmp_in = "/tmp/enhance_in.png"
-        tmp_out = "/tmp/enhance_out.png"
-        img.save(tmp_in, format="PNG")
-
-        result = client.predict(
-            image=handle_file(tmp_in),
-            version="v1.4",          # GFPGAN model version
-            scale=2,                 # upscale factor
-            api_name="/gfpgan_face",
-        )
-
-        # result is usually a filepath string or tuple
-        if isinstance(result, (list, tuple)):
-            result = result[0]
-
-        out = Image.open(result).convert("RGB")
-        return out
-    except Exception as e:
-        print(f"[AI restore failed] {e}")
-        return None  # fall back to filters
+def parse_multipart(body, boundary):
+    """Minimal multipart/form-data parser. Returns dict of name -> bytes."""
+    parts = {}
+    delim = b"--" + boundary
+    chunks = body.split(delim)
+    for chunk in chunks:
+        if not chunk or chunk in (b"--\r\n", b"--"):
+            continue
+        chunk = chunk.lstrip(b"\r\n")
+        if b"\r\n\r\n" not in chunk:
+            continue
+        header_blob, data = chunk.split(b"\r\n\r\n", 1)
+        if data.endswith(b"\r\n"):
+            data = data[:-2]
+        m = re.search(rb'name="([^"]+)"', header_blob)
+        if m:
+            parts[m.group(1).decode()] = data
+    return parts
 
 
-# ---------- Fallback PIL enhancer ----------
-def _resize_if_needed(img: Image.Image) -> Image.Image:
-    if max(img.size) > MAX_DIM:
-        ratio = MAX_DIM / max(img.size)
-        img = img.resize((int(img.width * ratio), int(img.height * ratio)), Image.LANCZOS)
-    return img
+class Handler(BaseHTTPRequestHandler):
+    def _cors(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "*")
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self._cors()
+        self.end_headers()
+
+    def do_GET(self):
+        body = json.dumps({
+            "status": "EnhanceAI running",
+            "ai_enabled": bool(AI_ENGINE_KEY),
+            "host": AI_ENGINE_HOST,
+        }).encode()
+        self.send_response(200)
+        self._cors()
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        if not self.path.startswith("/enhance"):
+            self.send_response(404)
+            self.end_headers()
+            return
+        try:
+            ctype = self.headers.get("Content-Type", "")
+            if "boundary=" not in ctype:
+                raise ValueError("no boundary in content-type")
+            boundary = ctype.split("boundary=", 1)[1].strip().strip('"').encode()
+
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            fields = parse_multipart(body, boundary)
+
+            if "file" not in fields:
+                raise ValueError("no 'file' field in upload")
+
+            image_bytes = fields["file"]
+            print(f"[IN ] {len(image_bytes)} bytes")
+
+            if not AI_ENGINE_KEY:
+                self._send_image(image_bytes)
+                return
+
+            r = requests.post(
+                f"https://{AI_ENGINE_HOST}/enhance-face",
+                files={"image": ("input.jpg", image_bytes, "image/jpeg")},
+                data={"mode": "single"},
+                headers={
+                    "x-rapidapi-key": AI_ENGINE_KEY,
+                    "x-rapidapi-host": AI_ENGINE_HOST,
+                },
+                timeout=180,
+            )
+            print(f"[API] status={r.status_code}")
+            if r.status_code != 200:
+                print(f"[ERR] {r.text[:300]}")
+                self._send_image(image_bytes)
+                return
+
+            url = r.json().get("image_url")
+            if not url:
+                print(f"[NO URL] {r.text[:300]}")
+                self._send_image(image_bytes)
+                return
+
+            print(f"[DL ] {url[:80]}...")
+            enhanced = requests.get(url, timeout=60).content
+            print(f"[OUT] {len(enhanced)} bytes")
+            self._send_image(enhanced)
+
+        except Exception as e:
+            print(f"[ERROR] {type(e).__name__}: {e}")
+            self.send_response(500)
+            self._cors()
+            self.end_headers()
+            self.wfile.write(str(e).encode())
+
+    def _send_image(self, data):
+        self.send_response(200)
+        self._cors()
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, fmt, *args):
+        pass
 
 
-def pil_enhance(img: Image.Image, mode: str) -> Image.Image:
-    img = _resize_if_needed(img)
-    if mode == "portrait":
-        img = img.resize((img.width * 2, img.height * 2), Image.LANCZOS)
-        img = img.filter(ImageFilter.UnsharpMask(radius=3, percent=180, threshold=3))
-        img = ImageEnhance.Color(img).enhance(1.15)
-        img = ImageEnhance.Contrast(img).enhance(1.1)
-        img = ImageEnhance.Brightness(img).enhance(1.05)
-    elif mode == "landscape":
-        img = img.resize((img.width * 2, img.height * 2), Image.LANCZOS)
-        img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=140, threshold=3))
-        img = ImageEnhance.Color(img).enhance(1.35)
-        img = ImageEnhance.Contrast(img).enhance(1.2)
-    elif mode == "old":
-        img = img.resize((img.width * 2, img.height * 2), Image.LANCZOS)
-        img = ImageEnhance.Contrast(img).enhance(1.4)
-        img = ImageEnhance.Sharpness(img).enhance(2.0)
-        img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=200, threshold=2))
-    return img
-
-
-# ---------- Routes ----------
-@app.get("/")
-def root():
-    return {
-        "status": "EnhanceAI backend running",
-        "ai_face_restore": bool(HF_TOKEN),
-        "modes": ["portrait", "landscape", "old"],
-    }
-
-
-@app.post("/enhance/{mode}")
-async def enhance(mode: str, file: UploadFile = File(...)):
-    data = await file.read()
-    try:
-        img = Image.open(io.BytesIO(data)).convert("RGB")
-    except Exception:
-        raise HTTPException(400, "Invalid image")
-
-    # For portrait, try AI face restore first
-    if mode == "portrait" and HF_TOKEN:
-        ai_result = ai_face_restore(img)
-        if ai_result is not None:
-            buf = io.BytesIO()
-            ai_result.save(buf, format="PNG", optimize=True)
-            buf.seek(0)
-            return StreamingResponse(buf, media_type="image/png")
-
-    # Otherwise fall back to PIL filters
-    enhanced = pil_enhance(img, mode)
-    buf = io.BytesIO()
-    enhanced.save(buf, format="PNG", optimize=True)
-    buf.seek(0)
-    return StreamingResponse(buf, media_type="image/png")
+if __name__ == "__main__":
+    print(f"EnhanceAI backend on http://0.0.0.0:{PORT}")
+    print(f"API key set: {bool(AI_ENGINE_KEY)}")
+    HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
