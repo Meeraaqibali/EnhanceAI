@@ -25,6 +25,9 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Generate missing platform folders
+        run: flutter create . --platforms=android --project-name enhance_ai
+
       - name: Flutter pub get
         run: flutter pub get
 
