@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image/image.dart' as img;
 import 'package:gal/gal.dart';
+import 'draft_store.dart';
 
 // ============================================================
 //  SETTINGS MODEL
@@ -491,6 +492,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String _mode = "portrait";
   double _intensity = 0.7;
   DateTime? _lastBackPress;
+  List<Draft> _drafts = [];
 
   late AnimationController _shimmerCtrl;
   late AnimationController _pulseCtrl;
@@ -513,6 +515,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         vsync: this, duration: const Duration(milliseconds: 1200))
       ..repeat(reverse: true);
     appSettings.addListener(_onSettingsChanged);
+    _loadDrafts();
   }
 
   void _onSettingsChanged() {
@@ -582,7 +585,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     ));
   }
 
-  void _reset() {
+  Future<void> _reset() async {
+    final ok = await _maybeSaveDraft();
+    if (!ok || !mounted) return;
     setState(() {
       _originalBytes = null;
       _enhancedBytes = null;
@@ -590,9 +595,123 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     });
   }
 
+  Future<void> _loadDrafts() async {
+    final list = await DraftStore.load();
+    if (mounted) setState(() => _drafts = list);
+  }
+
+  Future<void> _saveDraft() async {
+    if (_originalBytes == null || _enhancedBytes == null) return;
+    await DraftStore.add(
+      original: _originalBytes!,
+      enhanced: _enhancedBytes!,
+      mode: _mode,
+      intensity: _intensity,
+    );
+    await _loadDrafts();
+    if (mounted) _toast("Saved to drafts", success: true);
+  }
+
+  Future<bool> _maybeSaveDraft() async {
+    // Returns true if the user chose to keep going (discard or save happened)
+    if (_enhancedBytes == null) return true;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).brightness == Brightness.dark
+            ? const Color(0xFF1B1240)
+            : Colors.white,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        title: const Text("Unsaved enhancement"),
+        content: const Text(
+            "You have an enhanced image that hasn't been saved. Save it as a draft?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'discard'),
+            child: const Text("Discard",
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'save'),
+            child: const Text("Save draft"),
+          ),
+        ],
+      ),
+    );
+    if (choice == 'save') {
+      await _saveDraft();
+      return true;
+    }
+    if (choice == 'discard') return true;
+    return false;
+  }
+
+  Future<void> _openDraft(Draft d, {required bool edit}) async {
+    try {
+      final orig = await File(d.originalPath).readAsBytes();
+      final enh = await File(d.enhancedPath).readAsBytes();
+      if (!mounted) return;
+      if (edit) {
+        setState(() {
+          _originalBytes = orig;
+          _enhancedBytes = enh;
+          _mode = d.mode;
+          _intensity = d.intensity;
+        });
+      } else {
+        Navigator.push(
+          context,
+          PageRouteBuilder(
+            transitionDuration: const Duration(milliseconds: 350),
+            pageBuilder: (_, __, ___) =>
+                _DraftViewScreen(original: orig, enhanced: enh),
+            transitionsBuilder: (_, anim, __, child) =>
+                FadeTransition(opacity: anim, child: child),
+          ),
+        );
+      }
+    } catch (_) {
+      _toast("Could not open draft");
+    }
+  }
+
+  Future<void> _confirmDelete(Draft d) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).brightness == Brightness.dark
+            ? const Color(0xFF1B1240)
+            : Colors.white,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        title: const Text("Delete draft?"),
+        content: const Text("This will remove the draft permanently."),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text("Cancel")),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("Delete",
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await DraftStore.delete(d);
+      await _loadDrafts();
+    }
+  }
+
   Future<bool> _handleBack() async {
     if (_originalBytes != null || _enhancedBytes != null) {
-      _reset();
+      await _reset();
       return false;
     }
     final now = DateTime.now();
@@ -711,6 +830,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         _intensitySlider(),
                         const SizedBox(height: 18),
                         _actionButtons(),
+                        if (_drafts.isNotEmpty) ...[
+                          const SizedBox(height: 24),
+                          _draftsSection(),
+                        ],
                         if (_error != null) ...[
                           const SizedBox(height: 16),
                           Container(
@@ -798,7 +921,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ),
           if (_originalBytes != null)
             IconButton(
-              onPressed: _reset,
+              onPressed: () => _reset(),
               icon: const Icon(Icons.refresh_rounded, size: 24),
               tooltip: T.t('startOver'),
             ),
@@ -1059,6 +1182,64 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _draftsSection() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 10),
+          child: Row(
+            children: [
+              Icon(Icons.drafts_outlined,
+                  size: 16,
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.5)),
+              const SizedBox(width: 6),
+              Text("DRAFTS",
+                  style: TextStyle(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.5),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.5)),
+              const Spacer(),
+              Text("${_drafts.length}",
+                  style: TextStyle(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.4),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 150,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: _drafts.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (ctx, i) {
+              final d = _drafts[i];
+              return _DraftCard(
+                draft: d,
+                isDark: isDark,
+                onView: () => _openDraft(d, edit: false),
+                onEdit: () => _openDraft(d, edit: true),
+                onDelete: () => _confirmDelete(d),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -2033,3 +2214,208 @@ class _LeftClipper extends CustomClipper<Rect> {
   @override
   bool shouldReclip(_LeftClipper old) => old.pos != pos;
 }
+
+// ============================================================
+//  DRAFT CARD (with 3-dot menu)
+// ============================================================
+class _DraftCard extends StatefulWidget {
+  final Draft draft;
+  final bool isDark;
+  final VoidCallback onView;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _DraftCard({
+    required this.draft,
+    required this.isDark,
+    required this.onView,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  State<_DraftCard> createState() => _DraftCardState();
+}
+
+class _DraftCardState extends State<_DraftCard>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 120));
+    _scale = Tween<double>(begin: 1.0, end: 0.95)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _openMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: widget.isDark ? const Color(0xFF1B1240) : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.grey.withOpacity(0.15)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: Colors.grey.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 12),
+            _tile(ctx, Icons.visibility_outlined, "View",
+                widget.onView),
+            _tile(ctx, Icons.edit_outlined, "Edit", widget.onEdit),
+            _tile(ctx, Icons.delete_outline, "Delete", widget.onDelete,
+                destructive: true),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _tile(BuildContext ctx, IconData icon, String label,
+      VoidCallback action,
+      {bool destructive = false}) {
+    final color = destructive ? Colors.redAccent : null;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () {
+          Navigator.pop(ctx);
+          Future.delayed(
+              const Duration(milliseconds: 150), () => action());
+        },
+        child: Padding(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          child: Row(children: [
+            Icon(icon, size: 22, color: color),
+            const SizedBox(width: 16),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: color)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => _ctrl.forward(),
+      onTapUp: (_) => _ctrl.reverse(),
+      onTapCancel: () => _ctrl.reverse(),
+      onTap: widget.onView,
+      child: ScaleTransition(
+        scale: _scale,
+        child: SizedBox(
+          width: 110,
+          child: Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: Image.file(
+                  File(widget.draft.enhancedPath),
+                  width: 110,
+                  height: 150,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    width: 110,
+                    height: 150,
+                    color: Colors.grey.withOpacity(0.2),
+                    child: const Icon(Icons.broken_image_outlined,
+                        color: Colors.white54),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 4,
+                right: 4,
+                child: GestureDetector(
+                  onTap: _openMenu,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.55),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.more_vert,
+                        color: Colors.white, size: 16),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 6,
+                bottom: 6,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.55),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    widget.draft.mode.toUpperCase(),
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.5),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+//  DRAFT VIEW SCREEN
+// ============================================================
+class _DraftViewScreen extends StatelessWidget {
+  final Uint8List original;
+  final Uint8List enhanced;
+  const _DraftViewScreen({required this.original, required this.enhanced});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("Draft")),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Expanded(
+              child: BeforeAfterSlider(before: original, after: enhanced),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
