@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image/image.dart' as img;
 import 'package:gal/gal.dart';
+import 'package:http/http.dart' as http;
 import 'draft_store.dart';
 
 // ============================================================
@@ -28,6 +29,30 @@ class AppSettings extends ChangeNotifier {
 }
 
 final appSettings = AppSettings();
+
+// ============================================================
+//  BACKEND CONFIG
+// ============================================================
+class BackendConfig extends ChangeNotifier {
+  String _url = 'https://replace-me.trycloudflare.com';
+  bool _cloudEnabled = true;
+
+  String get url => _url;
+  bool get cloudEnabled => _cloudEnabled;
+
+  void setUrl(String v) {
+    _url = v.trim();
+    notifyListeners();
+  }
+
+  void setCloudEnabled(bool v) {
+    _cloudEnabled = v;
+    notifyListeners();
+  }
+}
+
+final backendConfig = BackendConfig();
+
 
 // ============================================================
 //  TRANSLATIONS
@@ -474,6 +499,26 @@ Future<Uint8List> processImage(Uint8List b, String m, double i) {
   return compute(_processImage, {'bytes': b, 'mode': m, 'intensity': i});
 }
 
+
+Future<Uint8List?> enhanceViaBackend(Uint8List bytes, String mode, double intensity) async {
+  if (!backendConfig.cloudEnabled) return null;
+  if (backendConfig.url.contains('replace-me')) return null;
+
+  try {
+    final uri = Uri.parse('${backendConfig.url}/enhance/');
+    final req = http.MultipartRequest('POST', uri)
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: 'input.jpg'));
+    final streamed = await req.send().timeout(const Duration(seconds: 120));
+    final res = await http.Response.fromStream(streamed);
+    if (res.statusCode == 200 && res.bodyBytes.length > 1000) {
+      return res.bodyBytes;
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
 // ============================================================
 //  HOME PAGE
 // ============================================================
@@ -515,6 +560,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         vsync: this, duration: const Duration(milliseconds: 1200))
       ..repeat(reverse: true);
     appSettings.addListener(_onSettingsChanged);
+    backendConfig.addListener(_onSettingsChanged);
     _loadDrafts();
   }
 
@@ -525,6 +571,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   @override
   void dispose() {
     appSettings.removeListener(_onSettingsChanged);
+    backendConfig.removeListener(_onSettingsChanged);
     _shimmerCtrl.dispose();
     _pulseCtrl.dispose();
     super.dispose();
@@ -549,18 +596,33 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _error = null;
     });
     final start = DateTime.now();
-    try {
-      final result = await processImage(_originalBytes!, _mode, _intensity);
-      final elapsed = DateTime.now().difference(start).inMilliseconds;
-      if (elapsed < 2000) {
-        await Future.delayed(Duration(milliseconds: 2000 - elapsed));
-      }
-      setState(() => _enhancedBytes = result);
-    } catch (e) {
-      setState(() => _error = "Enhance failed: $e");
-    } finally {
-      setState(() => _loading = false);
+
+    Uint8List? result;
+
+    // Try cloud AI first
+    if (backendConfig.cloudEnabled) {
+      result = await enhanceViaBackend(_originalBytes!, _mode, _intensity);
     }
+
+    // Fallback to on-device
+    if (result == null) {
+      try {
+        result = await processImage(_originalBytes!, _mode, _intensity);
+      } catch (e) {
+        setState(() => _error = "Enhance failed: $e");
+        setState(() => _loading = false);
+        return;
+      }
+    }
+
+    final elapsed = DateTime.now().difference(start).inMilliseconds;
+    if (elapsed < 1500) {
+      await Future.delayed(Duration(milliseconds: 1500 - elapsed));
+    }
+    setState(() {
+      _enhancedBytes = result;
+      _loading = false;
+    });
   }
 
   Future<void> _save() async {
@@ -1352,7 +1414,10 @@ class AppDrawer extends StatelessWidget {
                 () => _sheetLanguage(context)),
             _item(context, Icons.color_lens_outlined, T.t('accent'),
                 () => _sheetAccent(context)),
-            _item(context, Icons.info_outline, T.t('about'),
+                        _divider(context),
+            _cloudToggle(context),
+            _urlEditor(context),
+            _item(context, Icons.info_outline, T.t('about'), 
                 () => _push(context, const AboutScreen())),
             const Spacer(),
             Padding(
@@ -1629,6 +1694,87 @@ class AppDrawer extends StatelessWidget {
       ),
     );
   }
+
+  Widget _divider(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        child: Divider(color: Colors.grey.withOpacity(0.15), height: 1),
+      );
+
+  Widget _cloudToggle(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: AnimatedBuilder(
+        animation: backendConfig,
+        builder: (_, __) => SwitchListTile.adaptive(
+          value: backendConfig.cloudEnabled,
+          onChanged: backendConfig.setCloudEnabled,
+          title: const Text("Cloud AI",
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+          subtitle: Text(
+            backendConfig.cloudEnabled
+                ? "Using server-side AI enhancement"
+                : "Using on-device enhancement",
+            style: const TextStyle(fontSize: 12),
+          ),
+          secondary: Icon(
+            backendConfig.cloudEnabled
+                ? Icons.cloud_done_outlined
+                : Icons.phone_android_outlined,
+            size: 22,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _urlEditor(BuildContext context) {
+    final ctrl = TextEditingController(text: backendConfig.url);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: ListTile(
+        leading: const Icon(Icons.link, size: 22),
+        title: const Text("Backend URL",
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+        subtitle: AnimatedBuilder(
+          animation: backendConfig,
+          builder: (_, __) => Text(
+            backendConfig.url,
+            style: const TextStyle(fontSize: 11),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        onTap: () {
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text("Backend URL"),
+              content: TextField(
+                controller: ctrl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: "https://your-tunnel.trycloudflare.com",
+                ),
+              ),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text("Cancel")),
+                FilledButton(
+                  onPressed: () {
+                    backendConfig.setUrl(ctrl.text);
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text("Save"),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
 }
 
 // ============================================================

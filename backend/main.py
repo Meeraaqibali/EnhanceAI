@@ -7,15 +7,14 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 AI_ENGINE_KEY = os.getenv("AI_ENGINE_KEY", "")
 AI_ENGINE_HOST = "ai-powered-photo-restoration.p.rapidapi.com"
+AI_ENGINE_PATH = "/enhance-face"
 PORT = 8000
 
 
 def parse_multipart(body, boundary):
-    """Minimal multipart/form-data parser. Returns dict of name -> bytes."""
     parts = {}
     delim = b"--" + boundary
-    chunks = body.split(delim)
-    for chunk in chunks:
+    for chunk in body.split(delim):
         if not chunk or chunk in (b"--\r\n", b"--"):
             continue
         chunk = chunk.lstrip(b"\r\n")
@@ -46,6 +45,7 @@ class Handler(BaseHTTPRequestHandler):
             "status": "EnhanceAI running",
             "ai_enabled": bool(AI_ENGINE_KEY),
             "host": AI_ENGINE_HOST,
+            "path": AI_ENGINE_PATH,
         }).encode()
         self.send_response(200)
         self._cors()
@@ -62,16 +62,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             ctype = self.headers.get("Content-Type", "")
             if "boundary=" not in ctype:
-                raise ValueError("no boundary in content-type")
+                raise ValueError("no boundary")
             boundary = ctype.split("boundary=", 1)[1].strip().strip('"').encode()
 
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length)
             fields = parse_multipart(body, boundary)
-
-            if "file" not in fields:
-                raise ValueError("no 'file' field in upload")
-
             image_bytes = fields["file"]
             print(f"[IN ] {len(image_bytes)} bytes")
 
@@ -79,8 +75,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_image(image_bytes)
                 return
 
+            url = f"https://{AI_ENGINE_HOST}{AI_ENGINE_PATH}"
+            print(f"[REQ] POST {url}")
             r = requests.post(
-                f"https://{AI_ENGINE_HOST}/enhance-face",
+                url,
                 files={"image": ("input.jpg", image_bytes, "image/jpeg")},
                 data={"mode": "single"},
                 headers={
@@ -90,19 +88,25 @@ class Handler(BaseHTTPRequestHandler):
                 timeout=180,
             )
             print(f"[API] status={r.status_code}")
+            print(f"[BODY] {r.text[:400]}")
+
             if r.status_code != 200:
-                print(f"[ERR] {r.text[:300]}")
                 self._send_image(image_bytes)
                 return
 
-            url = r.json().get("image_url")
-            if not url:
-                print(f"[NO URL] {r.text[:300]}")
+            j = r.json()
+            img_url = (
+                j.get("image_url")
+                or (j.get("data") or {}).get("image_url")
+                or (j.get("result") or {}).get("image_url")
+                or j.get("url")
+            )
+            if not img_url:
+                print(f"[NO URL] {j}")
                 self._send_image(image_bytes)
                 return
 
-            print(f"[DL ] {url[:80]}...")
-            enhanced = requests.get(url, timeout=60).content
+            enhanced = requests.get(img_url, timeout=60).content
             print(f"[OUT] {len(enhanced)} bytes")
             self._send_image(enhanced)
 
@@ -128,4 +132,6 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     print(f"EnhanceAI backend on http://0.0.0.0:{PORT}")
     print(f"API key set: {bool(AI_ENGINE_KEY)}")
+    print(f"Host: {AI_ENGINE_HOST}")
+    print(f"Path: {AI_ENGINE_PATH}")
     HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
