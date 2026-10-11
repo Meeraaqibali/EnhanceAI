@@ -28,6 +28,12 @@ jobs:
       - name: Generate platform folders
         run: flutter create . --platforms=android --project-name enhance_ai
 
+      - name: Set app name to EnhanceAI
+        run: |
+          sed -i 's/android:label="enhance_ai"/android:label="EnhanceAI"/g' android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:label="[^"]*"/android:label="EnhanceAI"/g' android/app/src/main/AndroidManifest.xml
+          grep 'android:label' android/app/src/main/AndroidManifest.xml
+
       - name: Bump Android SDK
         run: |
           sed -i 's/compileSdkVersion .*/compileSdkVersion 35/' android/app/build.gradle || true
@@ -38,6 +44,9 @@ jobs:
 
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
+
+      - name: List generated icons (debug)
+        run: find android/app/src/main/res -name "*.png" | head -20
 
       - name: Generate splash screen
         run: dart run flutter_native_splash:create
