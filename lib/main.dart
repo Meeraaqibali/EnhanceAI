@@ -230,30 +230,48 @@ class AnimatedSplash extends StatefulWidget {
 }
 
 class _AnimatedSplashState extends State<AnimatedSplash>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
+    with TickerProviderStateMixin {
+  late AnimationController _inCtrl;
+  late AnimationController _outCtrl;
   late Animation<double> _scale;
   late Animation<double> _fade;
+  late Animation<double> _outScale;
+  late Animation<double> _outFade;
 
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 2400));
+    _inCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 2000));
+    _outCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 800));
     _scale = Tween<double>(begin: 0.3, end: 1.0).animate(CurvedAnimation(
-        parent: _ctrl,
+        parent: _inCtrl,
         curve: const Interval(0.0, 0.7, curve: Curves.easeOutBack)));
     _fade = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
-        parent: _ctrl,
+        parent: _inCtrl,
         curve: const Interval(0.0, 0.5, curve: Curves.easeOut)));
-    _ctrl.forward();
-    Future.delayed(const Duration(milliseconds: 3600), () {
+    _outScale = Tween<double>(begin: 1.0, end: 1.4).animate(
+        CurvedAnimation(parent: _outCtrl, curve: Curves.easeIn));
+    _outFade = Tween<double>(begin: 1.0, end: 0.0).animate(
+        CurvedAnimation(parent: _outCtrl, curve: Curves.easeIn));
+
+    _inCtrl.forward();
+
+    // entrance 2s, hold 1.5s -> start exit at 3.5s
+    Future.delayed(const Duration(milliseconds: 3500), () {
+      if (mounted) _outCtrl.forward();
+    });
+    // exit 0.8s -> navigate at 4.4s
+    Future.delayed(const Duration(milliseconds: 4400), () {
       if (mounted) {
         Navigator.of(context).pushReplacement(PageRouteBuilder(
-          transitionDuration: const Duration(milliseconds: 700),
+          transitionDuration: const Duration(milliseconds: 500),
           pageBuilder: (_, __, ___) => const HomePage(),
-          transitionsBuilder: (_, anim, __, child) =>
-              FadeTransition(opacity: anim, child: child),
+          transitionsBuilder: (_, anim, __, child) => FadeTransition(
+            opacity: CurvedAnimation(parent: anim, curve: Curves.easeIn),
+            child: child,
+          ),
         ));
       }
     });
@@ -261,7 +279,8 @@ class _AnimatedSplashState extends State<AnimatedSplash>
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    _inCtrl.dispose();
+    _outCtrl.dispose();
     super.dispose();
   }
 
@@ -281,46 +300,68 @@ class _AnimatedSplashState extends State<AnimatedSplash>
           ),
         ),
         child: Center(
-          child: FadeTransition(
-            opacity: _fade,
-            child: ScaleTransition(
-              scale: _scale,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 120,
-                    height: 120,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [appSettings.accent, const Color(0xFF448AFF)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(32),
-                      boxShadow: [
-                        BoxShadow(
-                            color: appSettings.accent.withOpacity(0.5),
-                            blurRadius: 40,
-                            spreadRadius: 4),
+          child: AnimatedBuilder(
+            animation: _outCtrl,
+            builder: (_, child) {
+              return Opacity(
+                opacity: (1.0 - _outCtrl.value).clamp(0.0, 1.0),
+                child: Transform.scale(
+                  scale: 1.0 + _outCtrl.value * 0.3,
+                  child: child,
+                ),
+              );
+            },
+            child: AnimatedBuilder(
+              animation: _inCtrl,
+              builder: (_, __) {
+                return FadeTransition(
+                  opacity: _fade,
+                  child: ScaleTransition(
+                    scale: _scale,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 120,
+                          height: 120,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                appSettings.accent,
+                                const Color(0xFF448AFF)
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            borderRadius: BorderRadius.circular(32),
+                            boxShadow: [
+                              BoxShadow(
+                                  color: appSettings.accent.withOpacity(0.5),
+                                  blurRadius: 40,
+                                  spreadRadius: 4),
+                            ],
+                          ),
+                          child: const Icon(Icons.auto_awesome,
+                              color: Colors.white, size: 60),
+                        ),
+                        const SizedBox(height: 28),
+                        const Text("EnhanceAI",
+                            style: TextStyle(
+                                fontSize: 34,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                                letterSpacing: 0.5)),
+                        const SizedBox(height: 8),
+                        Text(T.t('tagline'),
+                            style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.white54,
+                                letterSpacing: 2)),
                       ],
                     ),
-                    child: const Icon(Icons.auto_awesome,
-                        color: Colors.white, size: 60),
                   ),
-                  const SizedBox(height: 28),
-                  const Text("EnhanceAI",
-                      style: TextStyle(
-                          fontSize: 34,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                          letterSpacing: 0.5)),
-                  const SizedBox(height: 8),
-                  Text(T.t('tagline'),
-                      style: const TextStyle(
-                          fontSize: 14, color: Colors.white54, letterSpacing: 2)),
-                ],
-              ),
+                );
+              },
             ),
           ),
         ),
@@ -350,18 +391,38 @@ Uint8List _processImage(Map<String, dynamic> args) {
         interpolation: img.Interpolation.average);
   }
 
-  double c = 1.0, s = 1.0, b = 1.0;
+  // contrast / saturation / brightness / warmth (-1 cool ... +1 warm)
+  double c = 1.0, s = 1.0, b = 1.0, warmth = 0.0;
+
   switch (mode) {
     case 'portrait':
-      c = 1.0 + 0.05 * t; s = 1.0 + 0.05 * t; b = 1.0 + 0.02 * t; break;
+      c = 1.0 + 0.10 * t;
+      s = 1.0 + 0.15 * t;
+      b = 1.0 + 0.05 * t;
+      warmth = 0.15 * t;
+      break;
     case 'landscape':
-      c = 1.0 + 0.08 * t; s = 1.0 + 0.10 * t; b = 1.0 + 0.02 * t; break;
+      c = 1.0 + 0.22 * t;
+      s = 1.0 + 0.40 * t;
+      b = 1.0 + 0.02 * t;
+      warmth = -0.08 * t;
+      break;
     case 'old':
-      c = 1.0 + 0.08 * t; s = 1.0 - 0.05 * t; b = 1.0 + 0.03 * t; break;
+      c = 1.0 + 0.25 * t;
+      s = 1.0 - 0.65 * t;
+      b = 1.0 + 0.08 * t;
+      warmth = 0.40 * t;
+      break;
     case 'vivid':
-      c = 1.0 + 0.06 * t; s = 1.0 + 0.14 * t; b = 1.0 + 0.02 * t; break;
+      c = 1.0 + 0.20 * t;
+      s = 1.0 + 0.60 * t;
+      b = 1.0 + 0.05 * t;
+      break;
     case 'soft':
-      c = 1.0 - 0.03 * t; s = 1.0 + 0.03 * t; b = 1.0 + 0.03 * t; break;
+      c = 1.0 - 0.15 * t;
+      s = 1.0 - 0.10 * t;
+      b = 1.0 + 0.15 * t;
+      break;
   }
 
   final w = src.width;
@@ -371,21 +432,36 @@ Uint8List _processImage(Map<String, dynamic> args) {
   for (int y = 0; y < h; y++) {
     for (int x = 0; x < w; x++) {
       final p = src.getPixel(x, y);
-      double r = p.r.toDouble() * b;
-      double g = p.g.toDouble() * b;
-      double bl = p.b.toDouble() * b;
+      double r = p.r.toDouble();
+      double g = p.g.toDouble();
+      double bl = p.b.toDouble();
 
+      // brightness
+      r *= b;
+      g *= b;
+      bl *= b;
+
+      // contrast around midpoint
       r = (r - 128.0) * c + 128.0;
       g = (g - 128.0) * c + 128.0;
       bl = (bl - 128.0) * c + 128.0;
 
+      // warmth
+      if (warmth != 0.0) {
+        r += warmth * 15;
+        bl -= warmth * 15;
+      }
+
+      // saturation via luminance
       final lum = 0.299 * r + 0.587 * g + 0.114 * bl;
       r = lum + (r - lum) * s;
       g = lum + (g - lum) * s;
       bl = lum + (bl - lum) * s;
 
-      out.setPixelRgb(x, y, r.clamp(0, 255).toInt(),
-          g.clamp(0, 255).toInt(), bl.clamp(0, 255).toInt());
+      out.setPixelRgb(x, y,
+          r.clamp(0, 255).toInt(),
+          g.clamp(0, 255).toInt(),
+          bl.clamp(0, 255).toInt());
     }
   }
 
@@ -473,8 +549,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     try {
       final result = await processImage(_originalBytes!, _mode, _intensity);
       final elapsed = DateTime.now().difference(start).inMilliseconds;
-      if (elapsed < 800) {
-        await Future.delayed(Duration(milliseconds: 800 - elapsed));
+      if (elapsed < 2000) {
+        await Future.delayed(Duration(milliseconds: 2000 - elapsed));
       }
       setState(() => _enhancedBytes = result);
     } catch (e) {
