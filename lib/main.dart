@@ -622,6 +622,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   ManualAdjust _adj = presetForMode('portrait');
   DateTime? _lastBack;
   bool _showAdjust = false;
+  bool _hasCropped = false;
   double _bgBlurStrength = 0.0;
   bool _faceRestore = false;
   String? _expandRatio;
@@ -1063,35 +1064,107 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     ])),
   );
 
-  Widget _modeRow() => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Padding(
-        padding: const EdgeInsets.only(left: 4, bottom: 10),
-        child: Text(tr('enhanceMode').toUpperCase(), style: TextStyle(
-          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
-          fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.5))),
-      SizedBox(height: 88, child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        itemCount: modes.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
-        itemBuilder: (_, i) {
-          final m = modes[i];
-          final active = _mode == m['id'];
-          return AnimatedModeTile(
-            icon: m['icon'] as IconData,
-            label: tr(m['k'] as String),
-            active: active,
-            onTap: () => setState(() {
-              _mode = m['id'] as String;
-              _adj = presetForMode(_mode);
-            }),
-          );
-        },
-      )),
-    ],
-  );
+  Widget _modeRow() {
+    final current = modes.firstWhere((m) => m['id'] == _mode);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 10),
+          child: Text(tr('enhanceMode').toUpperCase(),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+              fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.5)),
+        ),
+        GestureDetector(
+          onTap: _openModeDropdown,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [
+                appSettings.accent.withOpacity(0.15),
+                const Color(0xFF448AFF).withOpacity(0.10)],
+                begin: Alignment.topLeft, end: Alignment.bottomRight),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: appSettings.accent.withOpacity(0.35), width: 1.4)),
+            child: Row(children: [
+              Icon(current['icon'] as IconData,
+                color: appSettings.accent, size: 22),
+              const SizedBox(width: 12),
+              Expanded(child: Text(tr(current['k'] as String),
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700))),
+              Icon(Icons.keyboard_arrow_down_rounded,
+                color: appSettings.accent, size: 22),
+            ]),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _openModeDropdown() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).brightness == Brightness.dark
+              ? const Color(0xFF1B1240) : Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.grey.withOpacity(0.15))),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 40, height: 4, decoration: BoxDecoration(
+            color: Colors.grey.withOpacity(0.4),
+            borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 12),
+          ...modes.map((m) {
+            final on = _mode == m['id'];
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Material(color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() {
+                      _mode = m['id'] as String;
+                      _adj = presetForMode(_mode);
+                    });
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: on ? appSettings.accent.withOpacity(0.2)
+                        : Colors.transparent,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: on
+                        ? appSettings.accent.withOpacity(0.5)
+                        : Colors.grey.withOpacity(0.15))),
+                    child: Row(children: [
+                      Icon(m['icon'] as IconData, size: 22,
+                        color: on ? appSettings.accent : null),
+                      const SizedBox(width: 14),
+                      Expanded(child: Text(tr(m['k'] as String),
+                        style: TextStyle(fontSize: 15,
+                          fontWeight: on ? FontWeight.w700 : FontWeight.w500,
+                          color: on ? appSettings.accent : null))),
+                      if (on) Icon(Icons.check_circle,
+                        color: appSettings.accent, size: 22),
+                    ]),
+                  ),
+                )),
+            );
+          }),
+          const SizedBox(height: 4),
+        ]),
+      ));
+  }
 
   Widget _intensityRow() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -1161,41 +1234,143 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Widget _toolRow() {
-    return Column(children: [
-      Row(children: [
-        Expanded(child: _smallTool(
-          icon: Icons.camera_outlined, label: activeLens.name,
-          onTap: _openLensPicker, active: _lensId != 'none')),
-        const SizedBox(width: 8),
-        Expanded(child: _smallTool(
-          icon: Icons.tune, label: tr('adjust'),
-          onTap: _openAdjustPanel, active: _showAdjust)),
-        const SizedBox(width: 8),
-        Expanded(child: _smallTool(
-          icon: Icons.flip, label: tr('transform'),
-          onTap: _openTransformSheet, active: false)),
-      ]),
-      const SizedBox(height: 8),
-      Row(children: [
-        Expanded(child: _smallTool(
-          icon: Icons.blur_on,
-          label: _bgBlurStrength > 0.05
-              ? 'Blur ${(_bgBlurStrength * 100).round()}%'
-              : 'BG Blur',
-          onTap: _openBlurSheet, active: _bgBlurStrength > 0.05)),
-        const SizedBox(width: 8),
-        Expanded(child: _smallTool(
-          icon: Icons.face_retouching_natural,
-          label: 'Face Fix',
-          onTap: () => setState(() => _faceRestore = !_faceRestore),
-          active: _faceRestore)),
-        const SizedBox(width: 8),
-        Expanded(child: _smallTool(
-          icon: Icons.aspect_ratio,
-          label: _expandRatio ?? 'Expand',
-          onTap: _openExpandSheet, active: _expandRatio != null)),
-      ]),
+    int activeCount = 0;
+    if (_lensId != 'none') activeCount++;
+    if (_showAdjust) activeCount++;
+    if (_bgBlurStrength > 0.05) activeCount++;
+    if (_faceRestore) activeCount++;
+    if (_expandRatio != null) activeCount++;
+    if (_adj.rotation != 0 || _adj.flipH || _adj.flipV) activeCount++;
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Padding(padding: const EdgeInsets.only(left: 4, bottom: 10),
+        child: Text('TOOLS', style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+          fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.5))),
+      GestureDetector(
+        onTap: _openToolsDropdown,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(colors: [
+              appSettings.accent.withOpacity(0.15),
+              const Color(0xFF448AFF).withOpacity(0.10)],
+              begin: Alignment.topLeft, end: Alignment.bottomRight),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: appSettings.accent.withOpacity(0.35), width: 1.4)),
+          child: Row(children: [
+            Icon(Icons.tune, color: appSettings.accent, size: 22),
+            const SizedBox(width: 12),
+            Expanded(child: Text(
+              activeCount > 0 ? 'Tools ($activeCount active)' : 'Tools',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700))),
+            Icon(Icons.keyboard_arrow_down_rounded,
+              color: appSettings.accent, size: 22),
+          ]),
+        ),
+      ),
     ]);
+  }
+
+  void _openToolsDropdown() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.7, minChildSize: 0.4, maxChildSize: 0.95,
+        builder: (_, scrollCtrl) => Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).brightness == Brightness.dark
+                ? const Color(0xFF1B1240) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
+          child: Column(children: [
+            const SizedBox(height: 12),
+            Container(width: 40, height: 4, decoration: BoxDecoration(
+              color: Colors.grey.withOpacity(0.4),
+              borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 12),
+            const Text('Tools', style: TextStyle(
+              fontSize: 18, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Expanded(child: ListView(
+              controller: scrollCtrl,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              children: [
+                _toolListTile(icon: Icons.camera_outlined, label: 'Lens',
+                  value: _lensId == 'none' ? 'None' : activeLens.name,
+                  active: _lensId != 'none',
+                  onTap: () { Navigator.pop(ctx); _openLensPicker(); }),
+                _toolListTile(icon: Icons.tune, label: 'Adjust',
+                  value: _showAdjust ? 'Open' : 'Off', active: _showAdjust,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() => _showAdjust = !_showAdjust);
+                  }),
+                _toolListTile(icon: Icons.flip, label: 'Transform',
+                  value: '${_adj.rotation.round()}°'
+                    '${_adj.flipH ? " · H" : ""}'
+                    '${_adj.flipV ? " · V" : ""}',
+                  active: _adj.rotation != 0 || _adj.flipH || _adj.flipV,
+                  onTap: () { Navigator.pop(ctx); _openTransformSheet(); }),
+                _toolListTile(icon: Icons.blur_on, label: 'Background Blur',
+                  value: _bgBlurStrength > 0.05
+                    ? '${(_bgBlurStrength * 100).round()}%' : 'Off',
+                  active: _bgBlurStrength > 0.05,
+                  onTap: () { Navigator.pop(ctx); _openBlurSheet(); }),
+                _toolListTile(icon: Icons.face_retouching_natural,
+                  label: 'Face Fix',
+                  value: _faceRestore ? 'On' : 'Off', active: _faceRestore,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() => _faceRestore = !_faceRestore);
+                  }),
+                _toolListTile(icon: Icons.aspect_ratio, label: 'Expand Canvas',
+                  value: _expandRatio ?? 'Original',
+                  active: _expandRatio != null,
+                  onTap: () { Navigator.pop(ctx); _openExpandSheet(); }),
+                const SizedBox(height: 20),
+              ])),
+          ]))));
+  }
+
+  Widget _toolListTile({required IconData icon, required String label,
+      required String value, required bool active, required VoidCallback onTap}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Material(color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: active ? appSettings.accent.withOpacity(0.2)
+                : Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: active
+                ? appSettings.accent.withOpacity(0.5)
+                : Colors.grey.withOpacity(0.15))),
+            child: Row(children: [
+              Icon(icon, size: 22, color: active ? appSettings.accent : null),
+              const SizedBox(width: 14),
+              Expanded(child: Text(label, style: TextStyle(fontSize: 15,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                color: active ? appSettings.accent : null))),
+              Text(value, style: TextStyle(fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: active ? appSettings.accent
+                  : Theme.of(context).colorScheme.onSurface.withOpacity(0.5))),
+              const SizedBox(width: 6),
+              Icon(Icons.chevron_right, size: 20,
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4)),
+            ]),
+          ),
+        )),
+    );
   }
 
   void _openBlurSheet() {
