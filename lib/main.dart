@@ -853,46 +853,70 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ),
           ),
           child: SafeArea(
-            child: Column(children: [
-              _header(),
-              Expanded(child: SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-                child: Column(children: [
-                  _imageArea(),
-                  const SizedBox(height: 22),
-                  _modeRow(),
-                  const SizedBox(height: 16),
-                  _intensityRow(),
-                  const SizedBox(height: 14),
-                  _actionRow(),
-                  const SizedBox(height: 14),
-                  _toolRow(),
-                  if (_showAdjust) ...[
-                    const SizedBox(height: 14),
-                    _adjustPanel(),
-                  ],
-                  if (_error != null) ...[
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.red.withOpacity(0.4)),
-                      ),
-                      child: Row(children: [
-                        const Icon(Icons.error_outline,
-                          color: Colors.redAccent, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(_error!, style: const TextStyle(
-                          color: Colors.redAccent, fontSize: 13))),
-                      ]),
+            child: OrientationBuilder(
+              builder: (context, orientation) {
+                final isLandscape = orientation == Orientation.landscape;
+                final previewHeight = isLandscape
+                    ? (_showAdjust ? 130.0 : 170.0)
+                    : (_original == null
+                        ? 280.0
+                        : (_showAdjust ? 200.0 : 320.0));
+
+                return Column(children: [
+                  _header(),
+                  SizedBox(
+                    height: previewHeight,
+                    width: double.infinity,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                      child: _imageArea(),
                     ),
-                  ],
-                ]),
-              )),
-            ]),
+                  ),
+                  Expanded(
+                    child: ClipRect(
+                      child: SingleChildScrollView(
+                        physics: const BouncingScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                        child: Column(children: [
+                          _modeRow(),
+                          const SizedBox(height: 16),
+                          _intensityRow(),
+                          const SizedBox(height: 14),
+                          _actionRow(),
+                          const SizedBox(height: 14),
+                          _toolRow(),
+                          if (_showAdjust) ...[
+                            const SizedBox(height: 14),
+                            _adjustPanel(),
+                          ],
+                          if (_error != null) ...[
+                            const SizedBox(height: 16),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                    color: Colors.red.withOpacity(0.4)),
+                              ),
+                              child: Row(children: [
+                                const Icon(Icons.error_outline,
+                                    color: Colors.redAccent, size: 20),
+                                const SizedBox(width: 8),
+                                Expanded(child: Text(_error!,
+                                    style: const TextStyle(
+                                        color: Colors.redAccent,
+                                        fontSize: 13))),
+                              ]),
+                            ),
+                          ],
+                        ]),
+                      ),
+                    ),
+                  ),
+                ]);
+              },
+            ),
           ),
         ),
       ),
@@ -967,7 +991,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return ClipRRect(
       borderRadius: BorderRadius.circular(22),
       child: Image.memory(_original!,
-        fit: BoxFit.cover, width: double.infinity));
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity));
   }
 
   Widget _emptyCard() {
@@ -975,6 +1001,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return GestureDetector(
       onTap: _pickSheet,
       child: Container(
+        width: double.infinity,
         height: double.infinity,
         decoration: BoxDecoration(
           color: isDark ? Colors.white.withOpacity(0.035) : Colors.white.withOpacity(0.7),
@@ -1014,6 +1041,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Widget _loadingCard() => Container(
+    width: double.infinity,
     height: double.infinity,
     decoration: BoxDecoration(
       borderRadius: BorderRadius.circular(22),
