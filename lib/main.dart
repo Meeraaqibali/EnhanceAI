@@ -1,5 +1,7 @@
+// LIVE_PREVIEW_V2_BUILD
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -228,6 +230,7 @@ class ManualAdjust {
   double rotation = 0;     // 0..360
   bool flipH = false;
   bool flipV = false;
+  double clarity = 0;      // 0..1 — mid-tone local contrast
 
   ManualAdjust clone() => ManualAdjust()
     ..brightness = brightness
@@ -240,12 +243,13 @@ class ManualAdjust {
     ..shadows = shadows
     ..rotation = rotation
     ..flipH = flipH
-    ..flipV = flipV;
+    ..flipV = flipV
+    ..clarity = clarity;
 
   bool get isDefault =>
       brightness == 0 && contrast == 0 && saturation == 0 && warmth == 0 &&
       vignette == 0 && sharpness == 0 && highlights == 0 && shadows == 0 &&
-      rotation == 0 && !flipH && !flipV;
+      rotation == 0 && !flipH && !flipV && clarity == 0;
 
   Map<String, dynamic> toMap() => {
     'brightness': brightness, 'contrast': contrast,
@@ -253,6 +257,7 @@ class ManualAdjust {
     'vignette': vignette, 'sharpness': sharpness,
     'highlights': highlights, 'shadows': shadows,
     'rotation': rotation, 'flipH': flipH, 'flipV': flipV,
+    'clarity': clarity,
   };
 }
 
@@ -260,25 +265,71 @@ class ManualAdjust {
 ManualAdjust presetForMode(String mode) {
   final m = ManualAdjust();
   switch (mode) {
+    // -------- PORTRAIT --------
+    // Grounded in Nikon Portrait Picture Control (lower clarity, softened skin,
+    // lifted shadows) + backlit-portrait workflow values.
     case 'portrait':
-      m.saturation = 0.08; m.contrast = 0.05; m.brightness = 0.03;
-      m.highlights = -0.05; m.shadows = 0.10;
+      m.saturation = 0.20;
+      m.contrast = 0.10;
+      m.brightness = 0.10;
+      m.highlights = -0.30;
+      m.shadows = 0.35;
+      m.warmth = 0.12;
+      m.clarity = 0.10;
       break;
+
+    // -------- LANDSCAPE --------
+    // Grounded in Sony Landscape mode (enhanced contrast + saturation) and
+    // Darkroom guidance that clarity is additive and "a little goes a long way".
     case 'landscape':
-      m.saturation = 0.20; m.contrast = 0.15; m.highlights = -0.10;
-      m.shadows = 0.05; m.sharpness = 0.10;
+      m.saturation = 0.42;
+      m.contrast = 0.28;
+      m.brightness = 0.02;
+      m.highlights = -0.20;
+      m.shadows = 0.22;
+      m.sharpness = 0.22;
+      m.clarity = 0.38;
       break;
+
+    // -------- OLD PHOTO (restore, not vintage) --------
+    // Grounded in recovery workflow: Highlights -40 to recover blown areas,
+    // Shadows +40 to recover dark detail, moderate saturation.
     case 'old':
-      m.saturation = -0.30; m.contrast = 0.20; m.warmth = 0.20;
-      m.brightness = 0.05; m.shadows = 0.15; m.sharpness = 0.15;
+      m.saturation = 0.18;
+      m.contrast = 0.32;
+      m.brightness = 0.10;
+      m.highlights = -0.40;
+      m.shadows = 0.42;
+      m.warmth = 0.08;
+      m.sharpness = 0.28;
+      m.clarity = 0.40;
       break;
+
+    // -------- VIVID --------
+    // Grounded in Nikon Vivid Picture Control (Clarity +2, Saturation +0.5,
+    // exposure compensation -0.3 to protect highlights).
     case 'vivid':
-      m.saturation = 0.35; m.contrast = 0.20; m.warmth = 0.05;
-      m.sharpness = 0.10;
+      m.saturation = 0.55;
+      m.contrast = 0.32;
+      m.brightness = 0.04;
+      m.highlights = -0.18;
+      m.shadows = 0.15;
+      m.warmth = 0.10;
+      m.sharpness = 0.22;
+      m.clarity = 0.28;
       break;
+
+    // -------- SOFT / DREAMY --------
+    // Grounded in dreamy-look definition: soft light, lifted blacks (low
+    // contrast), muted warm palette, lowered clarity.
     case 'soft':
-      m.saturation = -0.10; m.contrast = -0.10; m.brightness = 0.10;
-      m.shadows = 0.20;
+      m.saturation = 0.05;
+      m.contrast = -0.22;
+      m.brightness = 0.16;
+      m.highlights = 0.10;
+      m.shadows = 0.45;
+      m.warmth = 0.15;
+      m.clarity = 0.05;
       break;
   }
   return m;
@@ -287,6 +338,25 @@ ManualAdjust presetForMode(String mode) {
 // ============================================================
 //  MAIN
 // ============================================================
+// ============================================================
+//  LIVE PREVIEW HELPERS
+// ============================================================
+Uint8List _downscaleForPreviewStatic(Uint8List bytes) {
+  final src = img.decodeImage(bytes);
+  if (src == null) return bytes;
+  const maxDim = 220;
+  final longest = src.width > src.height ? src.width : src.height;
+  if (longest <= maxDim) {
+    return Uint8List.fromList(img.encodeJpg(src, quality: 85));
+  }
+  final ratio = maxDim / longest;
+  final w = (src.width * ratio).round().clamp(1, maxDim);
+  final h = (src.height * ratio).round().clamp(1, maxDim);
+  final resized = img.copyResize(src,
+      width: w, height: h, interpolation: img.Interpolation.average);
+  return Uint8List.fromList(img.encodeJpg(resized, quality: 85));
+}
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([
@@ -475,6 +545,7 @@ Uint8List _processImage(Map<String, dynamic> args) {
   double hl = ((preset.highlights) * k) + (adj['highlights'] as num) * 0.5;
   double sd = ((preset.shadows) * k) + (adj['shadows'] as num) * 0.5;
   double fade = lens.fade;
+  double clarity = (adj['clarity'] as num?)?.toDouble() ?? 0.0;
   c *= lens.contrast;
   s *= lens.saturation;
 
@@ -526,6 +597,40 @@ Uint8List _processImage(Map<String, dynamic> args) {
           r.clamp(0, 255).toInt(),
           g.clamp(0, 255).toInt(),
           bl.clamp(0, 255).toInt());
+    }
+  }
+
+  // Clarity — mid-tone local contrast (soft blur + unsharp on mid-freq)
+  if (clarity > 0.02) {
+    final blurred = img.Image(width: w0, height: h0);
+    for (int y = 0; y < h0; y++) {
+      for (int x = 0; x < w0; x++) {
+        int r = 0, g = 0, b = 0, cnt = 0;
+        for (int dy = -1; dy <= 1; dy++) {
+          final yy = (y + dy).clamp(0, h0 - 1);
+          for (int dx = -1; dx <= 1; dx++) {
+            final xx = (x + dx).clamp(0, w0 - 1);
+            final p = out.getPixel(xx, yy);
+            r += p.r.toInt(); g += p.g.toInt(); b += p.b.toInt();
+            cnt++;
+          }
+        }
+        blurred.setPixelRgb(x, y, r ~/ cnt, g ~/ cnt, b ~/ cnt);
+      }
+    }
+    final amt = clarity * 1.15;
+    for (int y = 0; y < h0; y++) {
+      for (int x = 0; x < w0; x++) {
+        final o = out.getPixel(x, y);
+        final bl = blurred.getPixel(x, y);
+        final nr = o.r + (o.r - bl.r) * amt;
+        final ng = o.g + (o.g - bl.g) * amt;
+        final nb = o.b + (o.b - bl.b) * amt;
+        out.setPixelRgb(x, y,
+            nr.clamp(0, 255).toInt(),
+            ng.clamp(0, 255).toInt(),
+            nb.clamp(0, 255).toInt());
+      }
     }
   }
 
@@ -627,6 +732,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool _faceRestore = false;
   String? _expandRatio;
 
+  // ---- Live preview state ----
+  Uint8List? _previewBytes;
+  Uint8List? _lowResBytes;
+  Timer? _previewTimer;
+  bool _renderingPreview = false;
+  bool _previewQueued = false;
+
   late AnimationController _shimmer, _pulse;
 
   final modes = const [
@@ -652,6 +764,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void dispose() {
     appSettings.removeListener(_onChange);
     backendConfig.removeListener(_onChange);
+    _previewTimer?.cancel();
     _shimmer.dispose(); _pulse.dispose();
     super.dispose();
   }
@@ -660,7 +773,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final p = await ImagePicker().pickImage(source: s, imageQuality: 95);
     if (p == null) return;
     final b = await p.readAsBytes();
-    setState(() { _original = b; _enhanced = null; _error = null; });
+    setState(() {
+      _original = b; _enhanced = null; _error = null;
+      _previewBytes = null; _lowResBytes = null;
+    });
+    try {
+      final low = await compute(_downscaleForPreviewStatic, b);
+      if (mounted) _lowResBytes = low;
+    } catch (_) {}
   }
 
   Future<void> _enhance() async {
@@ -734,6 +854,48 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       default:     w = 1600; h = 900;
     }
     return expandCanvas(bytes, w, h);
+  }
+
+  // ---- Live preview pipeline ----
+  void _schedulePreview() {
+    if (_original == null) return;
+    _previewTimer?.cancel();
+    _previewTimer = Timer(const Duration(milliseconds: 80), () async {
+      if (_lowResBytes == null) {
+        try {
+          _lowResBytes =
+              await compute(_downscaleForPreviewStatic, _original!);
+        } catch (_) { return; }
+      }
+      await _refreshPreview();
+    });
+  }
+
+  Future<void> _refreshPreview() async {
+    if (_lowResBytes == null) return;
+    if (_renderingPreview) { _previewQueued = true; return; }
+    _renderingPreview = true;
+    try {
+      Uint8List out;
+      if (_expandRatio != null) {
+        out = await _runExpand(_lowResBytes!, _expandRatio!);
+      } else if (_faceRestore) {
+        out = await _runFaceRestore(_lowResBytes!);
+      } else if (_bgBlurStrength > 0.05) {
+        out = await _runFaceBlur(_lowResBytes!);
+      } else {
+        out = _processImage({
+          'bytes': _lowResBytes!,
+          'mode': _mode,
+          'intensity': _intensity,
+          'adj': _adj.toMap(),
+          'lens': activeLens,
+        });
+      }
+      if (mounted) setState(() => _previewBytes = out);
+    } catch (_) {}
+    _renderingPreview = false;
+    if (_previewQueued) { _previewQueued = false; _schedulePreview(); }
   }
 
   Future<bool> _handleBack() async {
@@ -811,7 +973,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   subtitle: Text(l.brand, style: const TextStyle(fontSize: 12)),
                   trailing: on ? Icon(Icons.check_circle,
                     color: appSettings.accent) : null,
-                  onTap: () { setLens(l.id); Navigator.pop(ctx); setState(() {}); },
+                  onTap: () { setLens(l.id); Navigator.pop(ctx); setState(() {}); _schedulePreview(); },
                 );
               },
             )),
@@ -989,12 +1151,25 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (_enhanced != null) {
       return BeforeAfterSlider(before: _original!, after: _enhanced!);
     }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(22),
-      child: Image.memory(_original!,
-        fit: BoxFit.cover,
-        width: double.infinity,
-        height: double.infinity));
+    final preview = _previewBytes ?? _original!;
+    return Stack(children: [
+      Positioned.fill(child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: Image.memory(preview,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          width: double.infinity,
+          height: double.infinity))),
+      if (_previewBytes != null)
+        Positioned(top: 10, left: 10, child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.6),
+            borderRadius: BorderRadius.circular(8)),
+          child: const Text('LIVE', style: TextStyle(
+            color: Colors.white, fontSize: 10,
+            fontWeight: FontWeight.w800, letterSpacing: 1.2)))),
+    ]);
   }
 
   Widget _emptyCard() {
@@ -1326,6 +1501,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   onTap: () {
                     Navigator.pop(ctx);
                     setState(() => _faceRestore = !_faceRestore);
+                    _schedulePreview();
                   }),
                 _toolListTile(icon: Icons.aspect_ratio, label: 'Expand Canvas',
                   value: _expandRatio ?? 'Original',
@@ -1426,7 +1602,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           min: 0,
                           max: 1,
                           activeColor: appSettings.accent,
-                          onChanged: (v) => setS(() => setState(() => _bgBlurStrength = v)),
+                          onChanged: (v) { setS(() => setState(() => _bgBlurStrength = v)); _schedulePreview(); },
                         ),
                       ),
                       Text(
@@ -1511,6 +1687,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       onTap: () {
         setState(() => _expandRatio = ratio);
         Navigator.pop(ctx);
+        _schedulePreview();
       },
       child: AnimatedContainer(duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
@@ -1571,19 +1748,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               Expanded(child: _transformTile(
                 icon: Icons.flip, label: tr('flipH'),
                 active: _adj.flipH,
-                onTap: () => setS(() => setState(() => _adj.flipH = !_adj.flipH)))),
+                onTap: () { setS(() => setState(() => _adj.flipH = !_adj.flipH)); _schedulePreview(); })),
               const SizedBox(width: 10),
               Expanded(child: _transformTile(
                 icon: Icons.flip_camera_android, label: tr('flipV'),
                 active: _adj.flipV,
-                onTap: () => setS(() => setState(() => _adj.flipV = !_adj.flipV)))),
+                onTap: () { setS(() => setState(() => _adj.flipV = !_adj.flipV)); _schedulePreview(); })),
               const SizedBox(width: 10),
               Expanded(child: _transformTile(
                 icon: Icons.rotate_right, label: '90°',
                 active: false,
-                onTap: () => setS(() => setState(() {
+                onTap: () { setS(() => setState(() {
                   _adj.rotation = (_adj.rotation + 90) % 360;
-                })))),
+                })); _schedulePreview(); })),
             ]),
             const SizedBox(height: 16),
             Row(children: [
@@ -1593,7 +1770,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 value: _adj.rotation, min: 0, max: 360,
                 divisions: 72,
                 activeColor: appSettings.accent,
-                onChanged: (v) => setS(() => setState(() => _adj.rotation = v)))),
+                onChanged: (v) { setS(() => setState(() => _adj.rotation = v)); _schedulePreview(); })),
               Text("${_adj.rotation.round()}°", style: const TextStyle(
                 fontSize: 12, fontWeight: FontWeight.w700)),
             ]),
@@ -1679,7 +1856,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             trackHeight: 3,
             thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
             overlayShape: const RoundSliderOverlayShape(overlayRadius: 14)),
-          child: Slider(value: v, min: min, max: max, onChanged: onC))),
+          child: Slider(value: v, min: min, max: max,
+            onChanged: (val) { onC(val); _schedulePreview(); }))),
         SizedBox(width: 34, child: Text(v.toStringAsFixed(2),
           textAlign: TextAlign.right,
           style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600))),
