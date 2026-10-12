@@ -288,6 +288,13 @@ ManualAdjust presetForMode(String mode) {
 //  MAIN
 // ============================================================
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
@@ -960,7 +967,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return ClipRRect(
       borderRadius: BorderRadius.circular(22),
       child: Image.memory(_original!,
-        fit: BoxFit.cover, height: 340, width: double.infinity));
+        fit: BoxFit.cover, width: double.infinity));
   }
 
   Widget _emptyCard() {
@@ -968,7 +975,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return GestureDetector(
       onTap: _pickSheet,
       child: Container(
-        height: 340,
+        height: double.infinity,
         decoration: BoxDecoration(
           color: isDark ? Colors.white.withOpacity(0.035) : Colors.white.withOpacity(0.7),
           borderRadius: BorderRadius.circular(22),
@@ -1007,7 +1014,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Widget _loadingCard() => Container(
-    height: 340,
+    height: double.infinity,
     decoration: BoxDecoration(
       borderRadius: BorderRadius.circular(22),
       gradient: LinearGradient(
@@ -1982,7 +1989,7 @@ class _BeforeAfterSliderState extends State<BeforeAfterSlider> {
   @override
   Widget build(BuildContext context) => LayoutBuilder(builder: (ctx, box) {
     final w = box.maxWidth;
-    const h = 340.0;
+    final h = box.maxHeight.isFinite ? box.maxHeight : 340.0;
     return Container(
       height: h,
       decoration: BoxDecoration(
