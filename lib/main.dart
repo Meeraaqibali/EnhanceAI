@@ -393,6 +393,27 @@ class EnhanceApp extends StatelessWidget {
             seedColor: appSettings.accent, brightness: Brightness.dark,
           ),
         ),
+        builder: (context, child) {
+          final mode = appSettings.themeMode;
+          final platformDark =
+              MediaQuery.platformBrightnessOf(context) == Brightness.dark;
+          final isDark = mode == ThemeMode.dark ||
+              (mode == ThemeMode.system && platformDark);
+          return AnnotatedRegion<SystemUiOverlayStyle>(
+            value: SystemUiOverlayStyle(
+              statusBarColor: Colors.transparent,
+              statusBarIconBrightness:
+                  isDark ? Brightness.light : Brightness.dark,
+              systemNavigationBarColor:
+                  isDark ? const Color(0xFF0A0818) : const Color(0xFFF5F3FF),
+              systemNavigationBarIconBrightness:
+                  isDark ? Brightness.light : Brightness.dark,
+              systemNavigationBarDividerColor: Colors.transparent,
+              systemNavigationBarContrastEnforced: false,
+            ),
+            child: child ?? const SizedBox.shrink(),
+          );
+        },
         home: const AnimatedSplash(),
       ),
     );
@@ -902,10 +923,43 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<bool> _handleBack() async {
-    if (_original != null || _enhanced != null) { _reset(); return false; }
+    // Photo is loaded — confirm before discarding
+    if (_original != null || _enhanced != null) {
+      final discard = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: Theme.of(context).brightness == Brightness.dark
+              ? const Color(0xFF1B1240) : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+          title: const Text('Discard this photo?',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+          content: Text(
+            _enhanced != null
+              ? 'Your enhanced photo hasn\'t been saved. It will be lost.'
+              : 'Your current edit will be lost.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep editing')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.redAccent),
+              child: const Text('Discard')),
+          ],
+        ),
+      );
+      if (discard == true) _reset();
+      return false;
+    }
+    // No photo loaded — double-tap to exit app
     final now = DateTime.now();
-    if (_lastBack == null || now.difference(_lastBack!) > const Duration(seconds: 2)) {
-      _lastBack = now; _toast(tr('pressBackExit')); return false;
+    if (_lastBack == null ||
+        now.difference(_lastBack!) > const Duration(seconds: 2)) {
+      _lastBack = now;
+      _toast(tr('pressBackExit'));
+      return false;
     }
     return true;
   }
@@ -1023,10 +1077,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               builder: (context, orientation) {
                 final isLandscape = orientation == Orientation.landscape;
                 final previewHeight = isLandscape
-                    ? (_showAdjust ? 130.0 : 170.0)
-                    : (_original == null
-                        ? 280.0
-                        : (_showAdjust ? 200.0 : 320.0));
+                    ? 170.0
+                    : (_original == null ? 280.0 : 320.0);
 
                 return Column(children: [
                   _header(),
@@ -1159,7 +1211,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       Positioned.fill(child: ClipRRect(
         borderRadius: BorderRadius.circular(22),
         child: Image.memory(preview,
-          fit: BoxFit.cover,
+          fit: BoxFit.contain,
           gaplessPlayback: true,
           width: double.infinity,
           height: double.infinity))),
