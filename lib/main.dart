@@ -583,23 +583,24 @@ Uint8List _processImage(Map<String, dynamic> args) {
       double g = p.g.toDouble();
       double bl = p.b.toDouble();
 
-      // brightness
-      r += b * 80; g += b * 80; bl += b * 80;
+      // brightness (boosted 1.4x)
+      r += b * 112; g += b * 112; bl += b * 112;
 
-      // highlights / shadows (tone curve)
+      // highlights / shadows (tone curve, boosted 1.3x)
       final lum = 0.299 * r + 0.587 * g + 0.114 * bl;
       final hiW = (lum / 255).clamp(0.0, 1.0);
       final shW = (1.0 - hiW).clamp(0.0, 1.0);
-      r += hl * hiW * 60; g += hl * hiW * 60; bl += hl * hiW * 60;
-      r += sd * shW * 60; g += sd * shW * 60; bl += sd * shW * 60;
+      r += hl * hiW * 78; g += hl * hiW * 78; bl += hl * hiW * 78;
+      r += sd * shW * 78; g += sd * shW * 78; bl += sd * shW * 78;
 
-      // warmth
-      r += w * 20; bl -= w * 20;
+      // warmth (kept modest — do not over-boost, this was the yellow cause)
+      r += w * 18; bl -= w * 18;
 
-      // contrast around 128
-      r = (r - 128) * c + 128;
-      g = (g - 128) * c + 128;
-      bl = (bl - 128) * c + 128;
+      // contrast around 128 (boosted 1.3x)
+      final cc = 1.0 + (c - 1.0) * 1.3;
+      r = (r - 128) * cc + 128;
+      g = (g - 128) * cc + 128;
+      bl = (bl - 128) * cc + 128;
 
       // saturation
       final l2 = 0.299 * r + 0.587 * g + 0.114 * bl;
@@ -1097,6 +1098,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
                         child: Column(children: [
                           _modeRow(),
+                          _debugReadout(),
                           const SizedBox(height: 16),
                           _intensityRow(),
                           const SizedBox(height: 14),
@@ -1151,19 +1153,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       AnimatedBuilder(
         animation: _pulse,
         builder: (_, __) {
-          final glow = 8 + _pulse.value * 12;
+          final glow = 6 + _pulse.value * 8;
           return Container(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
               gradient: LinearGradient(colors: [
                 appSettings.accent, const Color(0xFF448AFF)]),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(8),
               boxShadow: [BoxShadow(
                 color: appSettings.accent.withOpacity(0.5),
                 blurRadius: glow, spreadRadius: 1)],
             ),
             child: const Icon(Icons.auto_awesome,
-              color: Colors.white, size: 20),
+              color: Colors.white, size: 18),
           );
         },
       ),
@@ -1428,6 +1430,27 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             onChanged: (v) => setState(() => _intensity = v)),
         ),
       ]),
+    );
+  }
+
+  Widget _debugReadout() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, left: 4),
+      child: Text(
+        'b:${_adj.brightness.toStringAsFixed(2)} '
+        'c:${_adj.contrast.toStringAsFixed(2)} '
+        's:${_adj.saturation.toStringAsFixed(2)} '
+        'w:${_adj.warmth.toStringAsFixed(2)} '
+        'hl:${_adj.highlights.toStringAsFixed(2)} '
+        'sd:${_adj.shadows.toStringAsFixed(2)} '
+        'vg:${_adj.vignette.toStringAsFixed(2)} '
+        'cl:${_adj.clarity.toStringAsFixed(2)}',
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w500,
+          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.45),
+        ),
+      ),
     );
   }
 
