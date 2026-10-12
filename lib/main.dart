@@ -1180,66 +1180,135 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _openBlurSheet() {
-    showModalBottomSheet(context: context, backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setS) => Container(
-        margin: const EdgeInsets.all(16), padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Theme.of(context).brightness == Brightness.dark
-              ? const Color(0xFF1B1240) : Colors.white,
-          borderRadius: BorderRadius.circular(24)),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(width: 40, height: 4, decoration: BoxDecoration(
-            color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2))),
-          const SizedBox(height: 16),
-          const Text('Background Blur', style: TextStyle(
-            fontSize: 18, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          Text('Detects faces and blurs everything else',
-            style: TextStyle(fontSize: 12,
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6))),
-          const SizedBox(height: 20),
-          Row(children: [
-            const Text('Strength', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-            Expanded(child: Slider(
-              value: _bgBlurStrength, min: 0, max: 1,
-              activeColor: appSettings.accent,
-              onChanged: (v) => setS(() => setState(() => _bgBlurStrength = v)))),
-            Text('${(_bgBlurStrength * 100).round()}%',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-          ]),
-          const SizedBox(height: 8),
-          FilledButton(onPressed: () { Navigator.pop(ctx); },
-            child: const Text('Done')),
-        ]),
-      ));
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setS) {
+            return Container(
+              margin: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? const Color(0xFF1B1240)
+                    : Colors.white,
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withOpacity(0.4),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Background Blur',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Detects faces and blurs everything else',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      const Text(
+                        'Strength',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                      Expanded(
+                        child: Slider(
+                          value: _bgBlurStrength,
+                          min: 0,
+                          max: 1,
+                          activeColor: appSettings.accent,
+                          onChanged: (v) => setS(() => setState(() => _bgBlurStrength = v)),
+                        ),
+                      ),
+                      Text(
+                        '${(_bgBlurStrength * 100).round()}%',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Done'),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   void _openExpandSheet() {
     final ratios = ['16:9', '9:16', '1:1', '4:5'];
-    showModalBottomSheet(context: context, backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        margin: const EdgeInsets.all(16), padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Theme.of(context).brightness == Brightness.dark
-              ? const Color(0xFF1B1240) : Colors.white,
-          borderRadius: BorderRadius.circular(24)),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(width: 40, height: 4, decoration: BoxDecoration(
-            color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2))),
-          const SizedBox(height: 16),
-          const Text('Expand Canvas', style: TextStyle(
-            fontSize: 18, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          Text('Fills empty space with a blurred version of your photo',
-            textAlign: TextAlign.center, style: TextStyle(fontSize: 12,
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6))),
-          const SizedBox(height: 20),
-          Wrap(spacing: 12, runSpacing: 12, children: [
-            _ratioChip(ctx, null, 'Original'),
-            ...ratios.map((r) => _ratioChip(ctx, r, r)),
-          ]),
-        ]),
-      ));
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Theme.of(context).brightness == Brightness.dark
+                ? const Color(0xFF1B1240)
+                : Colors.white,
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Expand Canvas',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Fills empty space with a blurred version of your photo',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  _ratioChip(ctx, null, 'Original'),
+                  ...ratios.map((r) => _ratioChip(ctx, r, r)),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Widget _ratioChip(BuildContext ctx, String? ratio, String label) {

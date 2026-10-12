@@ -28,26 +28,29 @@ jobs:
       - name: Generate platform folders
         run: flutter create . --platforms=android --project-name enhance_ai
 
-      - name: Set app name to EnhanceAI
+      - name: Patch Android build files
         run: |
+          # Fix app name
           sed -i 's/android:label="[^"]*"/android:label="EnhanceAI"/g' android/app/src/main/AndroidManifest.xml
 
-      - name: Set NDK + SDK versions
-        run: |
+          # Fix build.gradle.kts (Kotlin DSL)
           if [ -f android/app/build.gradle.kts ]; then
-            python3 - << 'PY'
-          import re
-          p = 'android/app/build.gradle.kts'
-          s = open(p).read()
-          if 'ndkVersion' not in s:
-              s = re.sub(r'(android\s*\{)', r'\1\n        ndkVersion = "27.0.12077973"', s, count=1)
-          s = re.sub(r'compileSdk\s*=\s*\d+', 'compileSdk = 35', s)
-          s = re.sub(r'minSdk\s*=\s*\d+', 'minSdk = 21', s)
-          s = re.sub(r'targetSdk\s*=\s*\d+', 'targetSdk = 35', s)
-          open(p, 'w').write(s)
-          PY
-          else
-            sed -i 's/compileSdkVersion .*/compileSdkVersion 35/' android/app/build.gradle || true
+            sed -i 's|ndkVersion = .*|ndkVersion = "27.0.12077973"|' android/app/build.gradle.kts
+            sed -i 's|compileSdk = .*|compileSdk = 35|' android/app/build.gradle.kts
+            sed -i 's|targetSdk = .*|targetSdk = 35|' android/app/build.gradle.kts
+            sed -i 's|minSdk = .*|minSdk = 21|' android/app/build.gradle.kts
+            echo "--- patched build.gradle.kts ---"
+            grep -E "ndkVersion|compileSdk|targetSdk|minSdk" android/app/build.gradle.kts
+          fi
+
+          # Fix build.gradle (Groovy fallback)
+          if [ -f android/app/build.gradle ]; then
+            sed -i 's/ndkVersion .*/ndkVersion "27.0.12077973"/' android/app/build.gradle
+            sed -i 's/compileSdkVersion .*/compileSdkVersion 35/' android/app/build.gradle
+            sed -i 's/targetSdkVersion .*/targetSdkVersion 35/' android/app/build.gradle
+            sed -i 's/minSdkVersion .*/minSdkVersion 21/' android/app/build.gradle
+            echo "--- patched build.gradle ---"
+            grep -E "ndkVersion|compileSdk|targetSdk|minSdk" android/app/build.gradle
           fi
 
       - name: Flutter pub get
