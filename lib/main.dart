@@ -1211,7 +1211,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           FilledButton(onPressed: () { Navigator.pop(ctx); },
             child: const Text('Done')),
         ]),
-      ))));
+      ));
   }
 
   void _openExpandSheet() {
