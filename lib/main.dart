@@ -8,7 +8,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:image/image.dart' as img;
 import 'package:gal/gal.dart';
 import 'package:http/http.dart' as http;
-import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'ai_features.dart';
 
 // ============================================================
@@ -709,27 +708,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void _reset() { setState(() { _original = null; _enhanced = null; _error = null; }); }
 
 
-  List<Map<String, num>> _facesToRects(List<Face> faces) => faces
-      .map((f) => <String, num>{
-            'x': f.boundingBox.left,
-            'y': f.boundingBox.top,
-            'w': f.boundingBox.width,
-            'h': f.boundingBox.height,
-          })
-      .toList();
-
   Future<Uint8List> _runFaceBlur(Uint8List bytes) async {
-    final faces = await detectFacesOnDevice(bytes);
-    final decoded = img.decodeImage(bytes);
-    final rects = _facesToRects(faces);
-    return applyFaceBlur(bytes, rects, decoded?.width ?? 1, decoded?.height ?? 1,
-        _bgBlurStrength);
+    return applyFaceBlur(bytes, _bgBlurStrength);
   }
 
   Future<Uint8List> _runFaceRestore(Uint8List bytes) async {
-    final faces = await detectFacesOnDevice(bytes);
-    final rects = _facesToRects(faces);
-    return faceAwareRestore(bytes, rects, 1.0);
+    return faceAwareRestore(bytes, 1.0);
   }
 
   Future<Uint8List> _runExpand(Uint8List bytes, String ratio) async {

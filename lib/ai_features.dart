@@ -1,41 +1,27 @@
-import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
-import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:image/image.dart' as img;
 
 // ============================================================
-//  FACE DETECTION
+//  HEURISTIC "FACE" REGION (no ML — center-weighted)
 // ============================================================
-Future<List<Face>> detectFacesOnDevice(Uint8List bytes) async {
-  try {
-    final tmp = File(
-        '${Directory.systemTemp.path}/fd_${DateTime.now().microsecondsSinceEpoch}.jpg');
-    await tmp.writeAsBytes(bytes);
-    final input = InputImage.fromFilePath(tmp.path);
-    final detector = FaceDetector(
-      options: FaceDetectorOptions(
-        enableContours: false,
-        enableLandmarks: false,
-        performanceMode: FaceDetectorMode.fast,
-      ),
-    );
-    final faces = await detector.processImage(input);
-    await detector.close();
-    try { await tmp.delete(); } catch (_) {}
-    return faces;
-  } catch (_) {
-    return [];
-  }
+List<Map<String, num>> heuristicFaceRegions(int width, int height) {
+  // Assume a portrait-style subject near the center
+  final w = width * 0.55;
+  final h = height * 0.55;
+  final x = (width - w) / 2;
+  final y = height * 0.15;
+  return [
+    {'x': x, 'y': y, 'w': w, 'h': h},
+  ];
 }
 
 // ============================================================
-//  FACE-AWARE BACKGROUND BLUR
+//  BACKGROUND BLUR (center focus)
 // ============================================================
 Uint8List _applyFaceBlur(Map<String, dynamic> args) {
   final bytes = args['bytes'] as Uint8List;
-  final rects = (args['rects'] as List).cast<Map<String, num>>();
   final strength = (args['strength'] as num).toDouble().clamp(0.0, 1.0);
 
   var src = img.decodeImage(bytes);
@@ -51,19 +37,17 @@ Uint8List _applyFaceBlur(Map<String, dynamic> args) {
         interpolation: img.Interpolation.average);
   }
 
-  // Pre-scale rect coordinates to match resized image
   final w = src.width, h = src.height;
-  final scaleX = w / (args['origW'] as int).toDouble();
-  final scaleY = h / (args['origH'] as int).toDouble();
+  final rects = heuristicFaceRegions(w, h);
 
-  // Build a soft mask: 255 = keep sharp, 0 = blur
+  // Build soft mask: 255 = keep sharp, 0 = blur
   final mask = Uint8List(w * h)..fillRange(0, w * h, 0);
 
   for (final r in rects) {
-    final cx = (r['x']! + r['w']! / 2) * scaleX;
-    final cy = (r['y']! + r['h']! / 2) * scaleY;
-    final rx = (r['w']! * scaleX) * 1.6; // expand to include head
-    final ry = (r['h']! * scaleY) * 1.8;
+    final cx = r['x']!.toDouble() + r['w']!.toDouble() / 2;
+    final cy = r['y']!.toDouble() + r['h']!.toDouble() / 2;
+    final rx = r['w']!.toDouble() * 0.8;
+    final ry = r['h']!.toDouble() * 0.9;
     for (int y = 0; y < h; y++) {
       for (int x = 0; x < w; x++) {
         final dx = (x - cx) / rx;
@@ -78,7 +62,6 @@ Uint8List _applyFaceBlur(Map<String, dynamic> args) {
     }
   }
 
-  // Feather the mask edges
   final blurred = img.gaussianBlur(src, radius: (strength * 14).round());
   final out = img.Image(width: w, height: h);
   for (int y = 0; y < h; y++) {
@@ -96,16 +79,12 @@ Uint8List _applyFaceBlur(Map<String, dynamic> args) {
   return Uint8List.fromList(img.encodeJpg(out, quality: 95));
 }
 
-Future<Uint8List> applyFaceBlur(Uint8List bytes, List<Map<String, num>> rects,
-    int origW, int origH, double strength) {
-  return compute(_applyFaceBlur, {
-    'bytes': bytes, 'rects': rects, 'origW': origW, 'origH': origH,
-    'strength': strength,
-  });
+Future<Uint8List> applyFaceBlur(Uint8List bytes, double strength) {
+  return compute(_applyFaceBlur, {'bytes': bytes, 'strength': strength});
 }
 
 // ============================================================
-//  CANVAS EXPANSION (portrait <-> landscape)
+//  CANVAS EXPANSION
 // ============================================================
 Uint8List _expandCanvas(Map<String, dynamic> args) {
   final bytes = args['bytes'] as Uint8List;
@@ -117,7 +96,6 @@ Uint8List _expandCanvas(Map<String, dynamic> args) {
   if (src == null) throw Exception('decode');
   src = img.bakeOrientation(src);
 
-  // Scale source to fit target while preserving aspect
   final srcRatio = src.width / src.height;
   final targetRatio = targetW / targetH;
   int fitW, fitH;
@@ -131,14 +109,13 @@ Uint8List _expandCanvas(Map<String, dynamic> args) {
   final fitted = img.copyResize(src,
       width: fitW, height: fitH, interpolation: img.Interpolation.cubic);
 
-  // Fill background: use blurred+enlarged version of the source
-  final canvas = img.Image(width: targetW, height: targetH);
   final bgSource = img.copyResize(src,
-      width: targetW, height: targetH,
-      interpolation: img.Interpolation.cubic);
+      width: targetW, height: targetH, interpolation: img.Interpolation.cubic);
   final bg = blurBg > 0
       ? img.gaussianBlur(bgSource, radius: (blurBg * 40).round())
       : bgSource;
+
+  final canvas = img.Image(width: targetW, height: targetH);
   for (int y = 0; y < targetH; y++) {
     for (int x = 0; x < targetW; x++) {
       final p = bg.getPixel(x, y);
@@ -146,7 +123,6 @@ Uint8List _expandCanvas(Map<String, dynamic> args) {
     }
   }
 
-  // Paste fitted image centered
   final ox = (targetW - fitW) ~/ 2;
   final oy = (targetH - fitH) ~/ 2;
   for (int y = 0; y < fitH; y++) {
@@ -167,11 +143,10 @@ Future<Uint8List> expandCanvas(Uint8List bytes, int targetW, int targetH,
 }
 
 // ============================================================
-//  FACE-AWARE RESTORE (heavy local sharpen on face)
+//  FACE-AWARE RESTORE (center-weighted)
 // ============================================================
 Uint8List _faceRestore(Map<String, dynamic> args) {
   final bytes = args['bytes'] as Uint8List;
-  final rects = (args['rects'] as List).cast<Map<String, num>>();
   final amount = (args['amount'] as num).toDouble().clamp(0.0, 1.0);
 
   var src = img.decodeImage(bytes);
@@ -179,36 +154,27 @@ Uint8List _faceRestore(Map<String, dynamic> args) {
   src = img.bakeOrientation(src);
 
   final w = src.width, h = src.height;
+  final rects = heuristicFaceRegions(w, h);
 
-  // Blur very slightly to denoise
-  var base = img.gaussianBlur(src, radius: 1);
-
-  // Sharpen with unsharp mask
+  final base = img.gaussianBlur(src, radius: 1);
   final sharp = img.convolution(base, filter: [
     0, -1, 0,
     -1, 5, -1,
     0, -1, 0,
   ], div: 1);
-
-  // Contrast punch
   final boosted = img.adjustColor(sharp,
       contrast: 1.0 + 0.15 * amount,
       saturation: 1.0 + 0.10 * amount);
 
-  if (rects.isEmpty) {
-    return Uint8List.fromList(img.encodeJpg(boosted, quality: 95));
-  }
-
-  // Blend: full effect inside face, reduced outside
   final out = img.Image(width: w, height: h);
   for (int y = 0; y < h; y++) {
     for (int x = 0; x < w; x++) {
-      double weight = 0.35; // baseline outside faces
+      double weight = 0.35;
       for (final r in rects) {
-        final rx = r['w']! * 0.9;
-        final ry = r['h']! * 0.9;
-        final cx = r['x']! + r['w']! / 2;
-        final cy = r['y']! + r['h']! / 2;
+        final rx = r['w']!.toDouble() * 0.9;
+        final ry = r['h']!.toDouble() * 0.9;
+        final cx = r['x']!.toDouble() + r['w']!.toDouble() / 2;
+        final cy = r['y']!.toDouble() + r['h']!.toDouble() / 2;
         final dx = (x - cx) / rx;
         final dy = (y - cy) / ry;
         final d2 = dx * dx + dy * dy;
@@ -229,9 +195,6 @@ Uint8List _faceRestore(Map<String, dynamic> args) {
   return Uint8List.fromList(img.encodeJpg(out, quality: 95));
 }
 
-Future<Uint8List> faceAwareRestore(Uint8List bytes,
-    List<Map<String, num>> rects, double amount) {
-  return compute(_faceRestore, {
-    'bytes': bytes, 'rects': rects, 'amount': amount,
-  });
+Future<Uint8List> faceAwareRestore(Uint8List bytes, double amount) {
+  return compute(_faceRestore, {'bytes': bytes, 'amount': amount});
 }
