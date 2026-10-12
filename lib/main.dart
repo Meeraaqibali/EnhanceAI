@@ -1731,53 +1731,12 @@ class AppDrawer extends StatelessWidget {
           _item(context, Icons.color_lens_outlined, tr('accent'),
             () => _sheetAccent(context)),
           Divider(color: Colors.grey.withOpacity(0.15), height: 1),
-          _cloudToggle(context),
-          _urlEditor(context),
           _item(context, Icons.info_outline, tr('about'),
             () => _push(context, const AboutScreen())),
           const Spacer(),
           Padding(padding: const EdgeInsets.all(16),
             child: Text(tr('version'), style: TextStyle(fontSize: 11,
               color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4)))),
-        ],
-      )),
-    );
-  }
-
-  Widget _cloudToggle(BuildContext context) {
-    return AnimatedBuilder(
-      animation: backendConfig,
-      builder: (_, __) => SwitchListTile.adaptive(
-        value: backendConfig.cloudEnabled,
-        onChanged: (v) => backendConfig.setCloudEnabled(v),
-        title: Text(tr('cloudAI'), style: const TextStyle(
-          fontSize: 15, fontWeight: FontWeight.w500)),
-        secondary: Icon(backendConfig.cloudEnabled
-          ? Icons.cloud_done_outlined : Icons.phone_android_outlined, size: 22),
-      ),
-    );
-  }
-
-  Widget _urlEditor(BuildContext context) {
-    final ctrl = TextEditingController(text: backendConfig.url);
-    return ListTile(
-      leading: const Icon(Icons.link, size: 22),
-      title: Text(tr('backendUrl'), style: const TextStyle(
-        fontSize: 15, fontWeight: FontWeight.w500)),
-      subtitle: Text(backendConfig.url.isEmpty ? 'not set' : backendConfig.url,
-        style: const TextStyle(fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
-      onTap: () => showDialog(context: context, builder: (ctx) => AlertDialog(
-        title: Text(tr('backendUrl')),
-        content: TextField(controller: ctrl, autofocus: true,
-          decoration: const InputDecoration(
-            hintText: 'https://your-tunnel.trycloudflare.com')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel')),
-          FilledButton(onPressed: () {
-            backendConfig.setUrl(ctrl.text);
-            Navigator.pop(ctx);
-          }, child: const Text('Save')),
         ],
       )),
     );
